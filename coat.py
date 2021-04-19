@@ -41,7 +41,8 @@ class SerialBlock(nn.Module):
         )
 
 
-        self.transformer = Transformer(depth=depth, dim=out_channels, heads=nheads, dim_head=out_channels//nheads, scale=scale)
+        self.transformer = Transformer(depth=depth, dim=out_channels, heads=nheads, dim_head=out_channels//nheads,
+                                       scale=scale, dropout=dropout)
 
     def forward(self, x, cls_tokens):
         '''
@@ -49,8 +50,8 @@ class SerialBlock(nn.Module):
         :param x: [B C H W]
         :return: [B (H W) C]
         '''
-
-        x = self.conv_embed(x[:, 1:])
+        x = self.conv_embed(x)
+        cls_tokens = self.cls_embed(cls_tokens)
         x = torch.cat((cls_tokens, x), dim=1)
         x = self.transformer(x)
         return x
@@ -87,12 +88,13 @@ class ParallelBlock(nn.Module):
 class CoaT(nn.Module):
     
     def __init__(self, in_channels, image_size, num_classes, out_channels=[64, 128, 256, 320], depths=[2, 2, 2, 2],
-                 heads=8, scales=[8, 8, 4, 4], downscales=[4, 2, 2, 2], kernels=[7, 3, 3, 3], use_parallel=True,
+                 heads=8, scales=[8, 8, 4, 4], downscales=[4, 2, 2, 2], kernels=[7, 3, 3, 3], use_parallel=False,
                  parallel_depth = 6, parallel_channels=152, dropout=0.):
         super(CoaT, self).__init__()
 
         assert len(out_channels) == len(depths) == len(scales) == len(downscales) == len(kernels)
         feature_size = image_size
+        self.cls_token = nn.Parameter(torch.randn(1, 1, in_channels))
         self.serial_layers = nn.ModuleList([])
         for out_channel, depth, scale, downscale, kernel in zip(out_channels, depths, scales, downscales, kernels):
             feature_size = feature_size // downscale
@@ -101,7 +103,7 @@ class CoaT(nn.Module):
             )
             in_channels = out_channel
 
-        self.cls_token = nn.Parameter(torch.randn(1, 1, in_channels))
+
         self.use_parallel = use_parallel
         if use_parallel:
             self.parallel_conv_attn = nn.ModuleList([])
@@ -118,7 +120,7 @@ class CoaT(nn.Module):
                 nn.Linear(in_channels*3, num_classes)
             )
 
-            
+
 
         self.serial_mlp_head = nn.Sequential(
             nn.LayerNorm(in_channels),
@@ -126,7 +128,7 @@ class CoaT(nn.Module):
         )
 
     def forward(self, x):
-        b, n, _ = x.shape
+        b, c, _, _ = x.shape
         cls_tokens = repeat(self.cls_token, '() n d -> b n d', b=b)
         serial_outputs = []
         for serial_block in self.serial_layers:
@@ -134,13 +136,27 @@ class CoaT(nn.Module):
             serial_outputs.append(x)
             cls_tokens = x[:, :1]
             l = w = int(math.sqrt(x[:, 1:].shape[1]))
-            x = rearrange(x[:, 1:], 'b (l w) c -> b c l w', l, w)
+            x = rearrange(x[:, 1:], 'b (l w) c -> b c l w', l=l, w=w)
 
         if self.use_parallel:
             pass
         else:
             return self.serial_mlp_head(cls_tokens.squeeze(1))
 
+
+if __name__ == "__main__":
+    img = torch.ones([1, 3, 224, 224])
+
+    model = CoaT(3, 224, 1000)
+
+    out = model(img)
+
+    print("Shape of out :", out.shape)  # [B, num_classes]
+
+
+    parameters = filter(lambda p: p.requires_grad, model.parameters())
+    parameters = sum([np.prod(p.size()) for p in parameters]) / 1_000_000
+    print('Trainable Parameters: %.3fM' % parameters)
 
 
 
