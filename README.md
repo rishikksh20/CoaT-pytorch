@@ -1,6 +1,6 @@
 # CoaT: Co-Scale Conv-Attentional Image Transformers
 This repo contains PyTorch implementation of paper [Co-Scale Conv-Attentional Image Transformers](https://arxiv.org/abs/2104.06399)
-,this repo is not the official implementation. For official implementation please visit [here](https://github.com/mlpc-ucsd/CoaT).
+and this is not the official implementation. For official implementation please visit [here](https://github.com/mlpc-ucsd/CoaT).
 
 ![](model.PNG)
 
