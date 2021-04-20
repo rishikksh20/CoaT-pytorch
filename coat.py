@@ -59,7 +59,7 @@ class SerialBlock(nn.Module):
 class ParallelBlock(nn.Module):
 
     def __init__(self, in_channels, nheads=8, dropout=0.):
-        super(SerialBlock, self).__init__()
+        super(ParallelBlock, self).__init__()
 
 
         self.p1 = PreNorm(in_channels, ConvAttention(in_channels,
@@ -107,11 +107,11 @@ class CoaT(nn.Module):
         self.use_parallel = use_parallel
         if use_parallel:
             self.parallel_conv_attn = nn.ModuleList([])
-            self.parallel_ff_attn = nn.ModuleList([])
+            self.parallel_ffn = nn.ModuleList([])
             for _ in range(parallel_depth):
                 self.parallel_conv_attn.append(ParallelBlock(parallel_channels, heads, dropout)
                 )
-                self.parallel_ff_attn.append(
+                self.parallel_ffn.append(
                         PreNorm(parallel_channels, FeedForward(parallel_channels, parallel_channels * 4, dropout=dropout))
                         )
 
@@ -138,8 +138,33 @@ class CoaT(nn.Module):
             l = w = int(math.sqrt(x[:, 1:].shape[1]))
             x = rearrange(x[:, 1:], 'b (l w) c -> b c l w', l=l, w=w)
 
+        s2 = serial_outputs[1]
+        s3 = serial_outputs[2]
+        s4 = serial_outputs[3]
         if self.use_parallel:
-            pass
+            for attn, ffn in zip(self.parallel_conv_attn, self.parallel_ffn):
+                s2, s3, s4 = attn(s2, s3, s4)
+                cls_s2 = s2[:, :1]
+                cls_s3 = s3[:, :1]
+                cls_s4 = s4[:, :1]
+                s2 = rearrange(s2[:,1:], 'b (l w) d -> b d l w', l=28, w=28)
+                s3 = rearrange(s3[:, 1:], 'b (l w) d -> b d l w', l=14, w=14)
+                s4 = rearrange(s4[:, 1:], 'b (l w) d -> b d l w', l=7, w=7)
+
+                s2 = s2 + F.interpolate(s3, (28, 28), mode='bilinear') + F.interpolate(s4, (28, 28), mode='bilinear')
+                s3 = s3 + F.interpolate(s2, (14, 14), mode='bilinear') + F.interpolate(s4, (14, 14), mode='bilinear')
+                s4 = s4 + F.interpolate(s2, (7, 7), mode='bilinear') + F.interpolate(s3, (7, 7), mode='bilinear')
+
+                s2 = rearrange(s2, 'b d l w -> b (l w) d')
+                s3 = rearrange(s3, 'b d l w -> b (l w) d')
+                s4 = rearrange(s4, 'b d l w -> b (l w) d')
+
+                s2 = ffn(torch.cat([cls_s2, s2], dim=1))
+                s3 = ffn(torch.cat([cls_s3, s3], dim=1))
+                s4 = ffn(torch.cat([cls_s4, s4], dim=1))
+
+            cls_tokens = torch.cat([s2[:,0], s3[:,0], s4[:,0]], dim=1)
+            return self.parallel_mlp_head(cls_tokens)
         else:
             return self.serial_mlp_head(cls_tokens.squeeze(1))
 
@@ -147,7 +172,7 @@ class CoaT(nn.Module):
 if __name__ == "__main__":
     img = torch.ones([1, 3, 224, 224])
 
-    model = CoaT(3, 224, 1000)
+    model = CoaT(3, 224, 1000, out_channels=[152, 152, 152, 152], scales=[4, 4, 4, 4], use_parallel=True)
 
     out = model(img)
 

@@ -13,14 +13,22 @@ import torch
 
 img = torch.ones([1, 3, 224, 224])
 
-model = CoaT(3, 224, 1000)
-out = model(img)
-
+coatlite = CoaT(3, 224, 1000)
+out = coatlite(img)
 print("Shape of out :", out.shape)  # [B, num_classes]
 
-parameters = filter(lambda p: p.requires_grad, model.parameters())
+parameters = filter(lambda p: p.requires_grad, coatlite.parameters())
 parameters = sum([np.prod(p.size()) for p in parameters]) / 1_000_000
-print('Trainable Parameters: %.3fM' % parameters)
+print('Trainable Parameters in CoaT-Lite: %.3fM' % parameters)
+
+# use_parallel=True for Parallel Group
+coat_tiny = CoaT(3, 224, 1000, out_channels=[152, 152, 152, 152], scales=[4, 4, 4, 4], use_parallel=True) 
+out = coat_tiny(img)
+print("Shape of out :", out.shape)  # [B, num_classes]
+
+parameters = filter(lambda p: p.requires_grad, coat_tiny.parameters())
+parameters = sum([np.prod(p.size()) for p in parameters]) / 1_000_000
+print('Trainable Parameters in CoaT Tiny: %.3fM' % parameters)
 ```
 ## Citation:
 ```
